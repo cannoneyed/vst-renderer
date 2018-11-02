@@ -2,50 +2,76 @@
 # RenderMan build process and conda used by jupyter notebooks. For now, I've opted
 # to run this script with /usr/include/python2.7, which is the linked version
 
+import os
 import librenderman as rm
-import wave
-import scipy.io.wavfile
 import numpy as np
+import librosa
 
 sampleRate = 44100
 bufferSize = 512
-fftSize = 512
+renderLength = 10.0
 
-engine = rm.RenderEngine(sampleRate, bufferSize, fftSize)
+engine = rm.RenderEngine(sampleRate, bufferSize)
 sylenth_path = '/Library/Audio/Plug-Ins/VST/Sylenth1.vst'
-if engine.load_plugin(sylenth_path):
-    print('loaded plugin succesfully')
 
-description = engine.get_plugin_parameters_description()
-description = description.split('\n')
+def load_plugin():
+    if engine.load_plugin(sylenth_path):
+        print('loaded plugin succesfully')
 
-# Settings to play a note and extract data from the synth.
-midiNote = 40
-midiVelocity = 127
-noteLength = 0.1
-renderLength = 5.0
 
-# # Get the patch and display it!
-preset_path = '/Users/andrewcoenen/cannoneyed/synth-embeddings/python/test.fxp'
-if engine.load_preset(preset_path):
-    print('loaded preset succesfully')
+def load_preset(preset_path):
+    if not engine.load_preset(preset_path):
+        print('error loading preset...')
 
-# patch = engine.get_patch()
 
-# for (index, value) in patch:
-#     if value != 0.0:
-#         print(index, value)
+def load_midi(midi_path):
+    if not engine.load_midi(midi_path):
+        print('error loading midi...')
 
-# generator = rm.PatchGenerator(engine)
-# new_patch = generator.get_random_patch()
-# engine.set_patch(new_patch)
+entries = []
+def isvalid(filename):
+    return os.path.isfile(filename) and '.fxp' in filename
 
-# Render the data.
-engine.render_patch(midiNote, midiVelocity, noteLength, renderLength, False)
-audio = engine.get_audio_frames()
-audio = np.array(audio, np.float32)
-# audio = audio.astype(np.int16)
+def makePresetEntry(dirpath, patch_name):
+    path_name = os.path.join(dirpath, patch_name)
+    patch_name = patch_name.replace(".fxp", "")
+    patch_name = patch_name.replace(" ", "_")
+    group = dirpath.replace("sylenth_patches/", "")
+    entry =(path_name, patch_name, group)
+    return entry
 
-print(max(audio))
+for (dirpath, dirnames, filenames) in os.walk('sylenth_patches'):
+    for f in filenames:
+        if not isvalid(os.path.join(dirpath, f)): continue
+        entry = makePresetEntry(dirpath, f)
+        entries.append(entry)
 
-scipy.io.wavfile.write('test.wav', sampleRate, audio)
+def render_audio(filename):
+    def render(output_filename):
+        engine.render_midi(renderLength)
+        audio = engine.get_audio_frames()
+        audio = np.array(audio, np.float)
+
+        librosa.output.write_wav(output_filename, audio, sampleRate)
+    render(filename)
+
+def make_output_filename(patch_name, modifier, group):
+    patch_name = patch_name.replace('&', 'and')
+    patch_name = patch_name.replace("'", '')
+    directory = 'output/' + group + "/" + patch_name
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    output_filename = directory + "/" + patch_name + modifier + '.wav'
+    return output_filename
+
+def render_preset(path, patch, group):
+    # render preset basic
+    load_preset(path)
+    output_filename = make_output_filename(patch, "__base", group)
+
+    render_audio(output_filename)
+
+load_plugin()
+load_midi("test.mid")
+(path, patch, group) = entries[0]
+render_preset(path, patch, group)
